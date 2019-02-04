@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 15
+VisualStudioVersion = 15.0.28307.136
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "AlphaTree_Oriented", "AlphaTree_Oriented\AlphaTree_Oriented.vcxproj", "{EF601D70-F581-4679-A66D-8D27257DF413}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Debug|x86 = Debug|x86
+		Release|x64 = Release|x64
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{EF601D70-F581-4679-A66D-8D27257DF413}.Debug|x64.ActiveCfg = Debug|x64
+		{EF601D70-F581-4679-A66D-8D27257DF413}.Debug|x64.Build.0 = Debug|x64
+		{EF601D70-F581-4679-A66D-8D27257DF413}.Debug|x86.ActiveCfg = Debug|Win32
+		{EF601D70-F581-4679-A66D-8D27257DF413}.Debug|x86.Build.0 = Debug|Win32
+		{EF601D70-F581-4679-A66D-8D27257DF413}.Release|x64.ActiveCfg = Release|x64
+		{EF601D70-F581-4679-A66D-8D27257DF413}.Release|x64.Build.0 = Release|x64
+		{EF601D70-F581-4679-A66D-8D27257DF413}.Release|x86.ActiveCfg = Release|Win32
+		{EF601D70-F581-4679-A66D-8D27257DF413}.Release|x86.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {AF67B652-C3E0-4710-87D1-FE512AA6F9F7}
+	EndGlobalSection
+EndGlobal
