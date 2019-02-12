@@ -13,9 +13,9 @@
 
 using namespace std;
 
-#define OUTPUT_FNAME "C:/Users/jwryu/RUG/2018/AlphaTree/SalienceTree_grey_10rep.dat"
+#define OUTPUT_FNAME "C:/Users/jwryu/RUG/2018/AlphaTree/SalienceTree_oriented_1rep.dat"
 
-#define INPUTIMAGE_DIR	"C:/Users/jwryu/Google Drive/RUG/2018/AlphaTree/imgdata/Grey"
+#define INPUTIMAGE_DIR	"C:/Users/jwryu/Google Drive/RUG/2018/AlphaTree/imgdata/Oriented"
 #define INPUTIMAGE_DIR_COLOUR	"C:/Users/jwryu/Google Drive/RUG/2018/AlphaTree/imgdata/Colour" //colour images are used after rgb2grey conversion
 #define REPEAT 1
 
@@ -153,7 +153,7 @@ typedef struct AlphaNode
 	uint32 parent;
 	uint32 area;
 	bool filtered; /* indicates whether or not the filtered value is OK */
-	pixel outval;  /* output value after filtering */
+	double outval;  /* output value after filtering */
 	double alpha;  /* alpha of flat zone */
 	double sumPix;
 	pixel minPix;
@@ -969,14 +969,18 @@ void Phase1(AlphaTree *tree, EdgeQueue *queue, uint32 *root, const pixel *img, c
 	for (y = 0; y < height - 1; y++)
 	{
 		PushEdge_NewPixel(tree, queue, p, p + width, img, root, 1);
+#if CONNECTIVITY == 8
 		PushEdge_OldPixel(tree, queue, p, p + width - 1, img, root, 3);
+#endif
 		p--;
 		for (x = 0; x < width - 1; x++)
 		{
 			PushEdge_NewPixel(tree, queue, p, p + width, img, root, 1);
 			PushEdge_OldPixel(tree, queue, p, p + 1, img, root, 0);
+#if CONNECTIVITY == 8
 			PushEdge_OldPixel(tree, queue, p, p + width - 1, img, root, 3);
 			PushEdge_OldPixel(tree, queue, p, p + width + 1, img, root, 2);
+#endif
 			p--;
 
 		}
@@ -1169,6 +1173,38 @@ AlphaTree *MakeAlphaTree(const pixel *img, const pixel **ori_imgs, uint8 connect
 	return tree;
 }
 
+pixel* SalienceTreeSalienceFilter(AlphaTree *tree, pixel *out, double lambda, uint32 size)
+{
+	uint32 i, imgsize = size, alpha_no;
+	//out = (pixel*)malloc(size * sizeof(pixel));
+	if (lambda <= tree->node[tree->curSize - 1].alpha) {
+		tree->node[tree->curSize - 1].outval =
+			tree->node[tree->curSize - 1].sumPix / tree->node[tree->curSize - 1].area;
+		for (i = tree->curSize - 2; i != 0xffffffff; i--) {
+			if (tree->node[i].alpha <= lambda) {
+				alpha_no = i;
+				break;
+			}
+		}
+		for (i = tree->curSize - 2; i != 0xffffffff; i--) {
+			if (tree->node[i].parent <= alpha_no) {
+				tree->node[i].outval = tree->node[tree->node[i].parent].outval;
+				tree->node[i].filtered = true;
+			}
+			else {
+				tree->node[i].outval = tree->node[i].sumPix / tree->node[i].area;
+			}
+		}
+	}
+	else {
+		for (i = tree->curSize - 1; i != 0xffffffff; i--) {
+			tree->node[i].outval = 0;
+		}
+	}
+	for (i = 0; i < imgsize; i++)
+		out[i] = (pixel)(tree->node[i].outval + .5);
+	return out;
+}// Filter based on values
 
 void SalienceTreeAreaFilter(AlphaTree *tree, pixel *out, int lambda) {
 	uint32 i, imgsize = tree->maxSize / 2;
@@ -1191,7 +1227,7 @@ void SalienceTreeAreaFilter(AlphaTree *tree, pixel *out, int lambda) {
 		}
 	}
 	for (i = 0; i < imgsize; i++)
-		out[i] = tree->node[i].outval;
+		out[i] = (pixel)(tree->node[i].outval+0.5);
 }
 
 #define NodeSalience(tree, p) (tree->node[Par(tree,p)].alpha)
@@ -1387,6 +1423,7 @@ int main(int argc, char *argv[]) {
 				cv::String str1(p.path().string().c_str());
 				cv::Mat cvimg;
 				cv::Mat outimg;
+				cv::Mat outimg1;
 				if (i == 0)
 					cvimg = imread(str1, cv::IMREAD_GRAYSCALE);
 				else
@@ -1394,7 +1431,6 @@ int main(int argc, char *argv[]) {
 					cvimg = imread(str1, cv::IMREAD_COLOR);
 					cv::cvtColor(cvimg, cvimg, CV_BGR2GRAY);
 				}
-				cvimg.copyTo(outimg);
 
 				/*
 				cv::namedWindow("Display window", cv::WINDOW_AUTOSIZE);// Create a window for display.
@@ -1406,7 +1442,7 @@ int main(int argc, char *argv[]) {
 				height = cvimg.rows;
 				width = cvimg.cols;
 				channel = cvimg.channels();
-
+				
 				cout << cnt << ": " << str1 << ' ' << height << 'x' << width << endl;
 
 				if (channel != 1)
@@ -1416,39 +1452,40 @@ int main(int argc, char *argv[]) {
 					exit(-1);
 				}
 
+
+				cv::Mat dest[CONNECTIVITY / 2];
+				double orientation[4] = { M_PI / 2, 0, M_PI / 4, 3 * M_PI / 4 };
+				cv::Mat src_f;
+				cvimg.convertTo(src_f, CV_32F);
+
+				pixel *ori_imgs[CONNECTIVITY / 2];
+				for (int ori_idx = 0; ori_idx < CONNECTIVITY / 2; ori_idx++)
+				{
+					int kernel_size = 31;
+					double sig = 1, th = orientation[ori_idx], lm = 1.0, gm = 0.02, ps = 0;
+					cv::Mat kernel = cv::getGaborKernel(cv::Size(kernel_size, kernel_size), sig, th, lm, gm, ps);
+					cv::filter2D(src_f, dest[ori_idx], CV_32F, kernel);
+					dest[ori_idx].convertTo(dest[ori_idx], CV_8U, 1.0 / 255.0); //because I don't know how to access float type Mat...
+					ori_imgs[ori_idx] = (pixel*)dest[ori_idx].data;
+					//cerr << dest(Rect(30, 30, 10, 10)) << endl; // peek into the data
+
+					//Gabor Filtering visualization
+					/*
+					cv::Mat viz;
+					cv::imshow("input", cvimg);
+					cv::imshow("k", kernel);
+					//dest[ori_idx].convertTo(dest[ori_idx], CV_8U, 1.0 / 255.0);
+					cv::imshow("d", dest[ori_idx]);
+					cv::waitKey();
+					*/
+
+				}
+
 				double runtime, minruntime;
 				for (int testrep = 0; testrep < REPEAT; testrep++)
 				{
 					memuse = max_memuse = 0;
-					auto wcts = std::chrono::system_clock::now();
 
-					cv::Mat dest[CONNECTIVITY / 2];
-					double orientation[4] = { M_PI / 2, 0, M_PI / 4, 3 * M_PI / 4 };
-					cv::Mat src_f;
-					cvimg.convertTo(src_f, CV_32F);
-
-					pixel *ori_imgs[2];
-					for (int ori_idx = 0; ori_idx < CONNECTIVITY / 2; ori_idx++)
-					{
-						int kernel_size = 31;
-						double sig = 1, th = orientation[ori_idx], lm = 1.0, gm = 0.02, ps = 0;
-						cv::Mat kernel = cv::getGaborKernel(cv::Size(kernel_size, kernel_size), sig, th, lm, gm, ps);
-						cv::filter2D(src_f, dest[ori_idx], CV_32F, kernel);
-						dest[ori_idx].convertTo(dest[ori_idx], CV_8U, 1.0 / 255.0); //because I don't know how to access float type Mat...
-						ori_imgs[ori_idx] = (pixel*)dest[ori_idx].data;
-						//cerr << dest(Rect(30, 30, 10, 10)) << endl; // peek into the data
-
-						//Gabor Filtering visualization
-						/*
-						cv::Mat viz;
-						cv::imshow("input", cvimg);
-						cv::imshow("k", kernel);
-						//dest[ori_idx].convertTo(dest[ori_idx], CV_8U, 1.0 / 255.0);
-						cv::imshow("d", dest[ori_idx]);
-						cv::waitKey();
-						*/
-
-					}
 					/*
 					main_ori = new uint8[width * height];
 
@@ -1492,15 +1529,27 @@ int main(int argc, char *argv[]) {
 					ori_imgs[1] = &ori[15];
 					tree = MakeSalienceTree(testimg, ori_imgs, 4, 5, 3, 1, 2, 3.0);
 					*/
+					auto wcts = std::chrono::system_clock::now();
 
-					tree = MakeAlphaTree(cvimg.data, ori_imgs, CONNECTIVITY, width, height, channel, 20.0);
+					tree = MakeAlphaTree((const pixel*)cvimg.data, (const pixel**)ori_imgs, CONNECTIVITY, width, height, channel, 1.0);
 					//		start = clock();
+
+					
+					cvimg.copyTo(outimg);
+					cvimg.copyTo(outimg1);
 					for (uint32 i = 0; i < height * width; i++)
 						outimg.data[i] = 0;
-					SalienceTreeAreaFilter(tree, (pixel*)outimg.data, 5);
-					cv::imshow("out", outimg);
-					cv::waitKey();
+					SalienceTreeSalienceFilter(tree, (pixel*)outimg.data, 10, width * height);
+					tree = MakeAlphaTree((const pixel*)cvimg.data, (const pixel**)ori_imgs, CONNECTIVITY, width, height, channel, 2.0);
 
+					for (uint32 i = 0; i < height * width; i++)
+						outimg1.data[i] = 0;
+					SalienceTreeSalienceFilter(tree, (pixel*)outimg1.data, 5, width * height);
+
+					cv::imshow("out_1.0", outimg);
+					cv::imshow("out_2.0", outimg1);
+					cv::waitKey();
+					
 
 					std::chrono::duration<double> wctduration = (std::chrono::system_clock::now() - wcts);
 					runtime = wctduration.count();
