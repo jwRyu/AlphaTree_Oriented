@@ -17,14 +17,14 @@ using namespace std;
 
 #define INPUTIMAGE_DIR	"C:/Users/jwryu/Google Drive/RUG/2018/AlphaTree/imgdata/Grey"
 #define INPUTIMAGE_DIR_COLOUR	"C:/Users/jwryu/Google Drive/RUG/2018/AlphaTree/imgdata/Colour" //colour images are used after rgb2grey conversion
-#define REPEAT 10
+#define REPEAT 1
 
 #define max(a,b) (a)>(b)?(a):(b)
 #define min(a,b) (a)>(b)?(b):(a)
 #define false 0
 #define true  1
 
-#define CONNECTIVITY  4
+#define CONNECTIVITY  8
 #define NUM_GREYLEVELS	256
 #define NULL_CCQUEUE 255
 
@@ -54,6 +54,10 @@ double omegafactor = 200000;
 
 typedef uint8 pixel;
 typedef unsigned long uint32;
+
+//tmp
+uint32 numpush = 0;
+uint32 numpop = 0;
 
 pixel *gval = NULL, *out = NULL;
 
@@ -177,6 +181,8 @@ void CCEdgeQueueInit(EdgeQueue *queue)
 
 	for (i = 0; i < queue->CCrepo_maxsize; i++)
 	{
+		CCqueue[i].next = NULL;
+
 		CCqueue[i].queue[0] = NULL;
 		CCqueue[i].bucket[0] = NULL;
 		CCqueue[i].curSize[0] = 0;
@@ -216,7 +222,7 @@ inline void PushCCEdgeQueueToBucket(EdgeQueue *queue, CCEdgeQueue *CCqueue, pixe
 	queue->cnt++;
 }
 
-inline void ConvList2Bucket(EdgeQueue *queue, CCEdgeQueue *CCqueue, CCEdgeBucket *bucket, uint8 ori)
+inline void ConvListToBucket(EdgeQueue *queue, CCEdgeQueue *CCqueue, CCEdgeBucket *bucket, uint8 ori)
 {
 	Edge *p, *q;
 	uint32 i;
@@ -228,7 +234,7 @@ inline void ConvList2Bucket(EdgeQueue *queue, CCEdgeQueue *CCqueue, CCEdgeBucket
 	{
 		bucket->levelhead[i] = p;
 		for (q = p->next; q && (p->level == q->level); q = p->next)
-			p = p->next;
+			p = q;
 		bucket->leveltail[i] = p;
 		p->next = NULL;
 		p = q;
@@ -239,32 +245,68 @@ inline void ConvList2Bucket(EdgeQueue *queue, CCEdgeQueue *CCqueue, CCEdgeBucket
 				bucket->levelhead[i++] = NULL;
 		}
 		else
+		{
+			while (i < queue->num_grey_levels)
+				bucket->levelhead[i++] = NULL;
 			break;
+		}
 	}
 }
 
-inline void AddList2Bucket(Edge *list, CCEdgeBucket *bucket)
+inline void PushEdgeToCCBucket(Edge *e, CCEdgeBucket *bucket)
+{
+	e->next = bucket->levelhead[e->level];
+	if(!e->next)
+		bucket->leveltail[e->level] = e;
+	bucket->levelhead[e->level] = e;
+}
+
+inline void PushListToCCBucket(Edge *list, CCEdgeBucket *bucket)
 {
 	Edge *p, *q, *r;
 	for (p = list; p; p = q)
 	{
 		r = p;
-		for (q = p->next; q && p->level == q->level; q = q->next);
+		for (q = p->next; q && p->level == q->level; q = q->next)
+			p = q;
 		p->next = bucket->levelhead[p->level];
-		bucket->levelhead[p->level] = r;
+		if (!p->next)
+			bucket->leveltail[p->level] = p;
+		bucket->levelhead[p->level] = r;	
 	}
 }
+/*
+uint8 testcceqbucket(CCEdgeQueue *cceq)
+{
+	uint8 test0 = 0, test1 = 0;
+	if (cceq->minlev_ori[0] < 255)
+	{
+		if (cceq->bucket[0])
+			test0 = (cceq->bucket[0]->levelhead[cceq->minlev_ori[0]] == NULL) || 
+			(cceq->bucket[0]->levelhead[cceq->minlev_ori[0]] == (Edge*)(0xcdcdcdcdcdcdcdcd));
+		else
+			test0 = cceq->queue[0]->level != cceq->minlev_ori[0];
+	}
+	if (cceq->minlev_ori[1] < 255)
+	{
+		if (cceq->bucket[1])
+			test1 = (cceq->bucket[1]->levelhead[cceq->minlev_ori[1]] == NULL) ||
+			(cceq->bucket[1]->levelhead[cceq->minlev_ori[1]] == (Edge*)(0xcdcdcdcdcdcdcdcd));
+		else
+			test1 = cceq->queue[1]->level != cceq->minlev_ori[1];
+	}
+
+	return  test0 || test1;
+}
+*/
+
 
 void PushEdgeToCCEdgeQueue(EdgeQueue *queue, CCEdgeQueue *CCqueue, Edge *e, uint8 ori) // put an Edge 'e' in a CCEdgeQueue 'CCqueue'
 {
 	Edge *p, *q;
-	//if (e->level < CCqueue->minlev)
-	//{
-	//	CCqueue->min_ori = ori;
-	//	CCqueue->minlev = e->level;
-	//}
+
 	CCqueue->minlev_ori[ori] = MIN(CCqueue->minlev_ori[ori], e->level);
-	if (CCqueue->curSize[ori] < queue->num_grey_levels)
+	if (CCqueue->curSize[ori] < queue->num_grey_levels - 1)
 	{
 		p = CCqueue->queue[ori];
 		if ((p == NULL) || (e->level <= p->level))
@@ -282,15 +324,15 @@ void PushEdgeToCCEdgeQueue(EdgeQueue *queue, CCEdgeQueue *CCqueue, Edge *e, uint
 			e->next = p;
 			q->next = e;
 		}
-		if (CCqueue->curSize[ori] == queue->num_grey_levels - 1) // List is big enough - change linked list to bucket sorted list
-			ConvList2Bucket(queue, CCqueue, NewCCEdgeBucket(queue), ori);
 	}
 	else
 	{
-		e->next = CCqueue->bucket[ori]->levelhead[e->level];
-		CCqueue->bucket[ori]->levelhead[e->level] = e->next;
+		if (CCqueue->curSize[ori] == queue->num_grey_levels - 1) // change linked list to bucket sorted list
+			ConvListToBucket(queue, CCqueue, NewCCEdgeBucket(queue), ori);
+		PushEdgeToCCBucket(e, CCqueue->bucket[ori]);
 	}
 	CCqueue->curSize[ori]++;
+//	numpush++;//tmp
 }
 
 void PushEdgeToIncidentCCs_Newpixel(AlphaTree *tree, EdgeQueue *queue, uint32 p, uint32 q, uint32 s, pixel edgeSalience, uint8 ori) //p is always a root, p & q never have a common ancestor. For Phase1.
@@ -303,6 +345,7 @@ void PushEdgeToIncidentCCs_Newpixel(AlphaTree *tree, EdgeQueue *queue, uint32 p,
 	e->next = NULL;
 	tree->node[p].ccqueue->queue[ori] = e;
 	tree->node[p].ccqueue->curSize[ori] = 1;
+//tmp//	numpush++;
 	tree->node[p].ccqueue->minlev_ori[ori] = edgeSalience;
 	tree->node[p].ccqueue->iNode = p;
 	PushCCEdgeQueueToBucket(queue, tree->node[p].ccqueue, edgeSalience); //add a CCEdgeQueue to the EdgeQueue
@@ -330,30 +373,45 @@ inline void CCEdgeQueueMerge_Ori(EdgeQueue *queue, CCEdgeQueue *q1, CCEdgeQueue 
 
 	q2->curSize[ori] += q1->curSize[ori];
 	q2->minlev_ori[ori] = MIN(q1->minlev_ori[ori], q2->minlev_ori[ori]);
-	if (n2 >= queue->num_grey_levels) 
+	if (q2->bucket[ori])
 	{
-		if (n1 >= queue->num_grey_levels) //Bucket + Bucket
+		if (q1->bucket[ori]) //Bucket + Bucket
 		{			
 			for (i = q1->minlev_ori[ori]; i < queue->num_grey_levels; i++)
 			{
-				q1->bucket[ori]->leveltail[i] = q2->bucket[ori]->levelhead[i];
-				q2->bucket[ori]->levelhead[i] = q1->bucket[ori]->levelhead[i];
+				if (q1->bucket[ori]->levelhead[i])
+				{
+					if (q2->bucket[ori]->levelhead[i])
+						q1->bucket[ori]->leveltail[i]->next = q2->bucket[ori]->levelhead[i];
+					else
+						q2->bucket[ori]->leveltail[i] = q1->bucket[ori]->leveltail[i];
+					q2->bucket[ori]->levelhead[i] = q1->bucket[ori]->levelhead[i];
+				}				
 			}
 		}
 		else //List + Bucket
-			AddList2Bucket(q1->queue[ori], q2->bucket[ori]);
+			PushListToCCBucket(q1->queue[ori], q2->bucket[ori]);
+
 	}
 	else
 	{
-		if (n1 >= queue->num_grey_levels) //Bucket + List
+		if (q1->bucket[ori]) //Bucket + List
 		{
-			AddList2Bucket(q2->queue[ori], q1->bucket[ori]);
+			PushListToCCBucket(q2->queue[ori], q1->bucket[ori]);
 			q2->bucket[ori] = q1->bucket[ori];
 		}
 		else if (n2 + n1 >= queue->num_grey_levels) //List + List => Bucket
 		{
-			ConvList2Bucket(queue, q2, NewCCEdgeBucket(queue), ori);
-			AddList2Bucket(q1->queue[ori], q2->bucket[ori]);
+			if (n2)
+			{
+				ConvListToBucket(queue, q2, NewCCEdgeBucket(queue), ori);
+				PushListToCCBucket(q1->queue[ori], q2->bucket[ori]);
+			}
+			else
+			{
+				ConvListToBucket(queue, q1, NewCCEdgeBucket(queue), ori);
+				q2->bucket[ori] = q1->bucket[ori];
+			}
 		}
 		else // List + List => List
 		{
@@ -412,7 +470,7 @@ void EdgeQueueInit(EdgeQueue *queue, uint32 img_width, uint32 img_height, double
 	//preallocate repositories
 	queue->CCrepo_cursize = queue->Edgerepo_cursize = queue->bucketrepo_cursize = 0;
 	queue->CCrepo_maxsize = img_width * img_height;
-	queue->Edgerepo_maxsize = 2 * (img_width * (img_height - 1) + (img_width - 1) * img_height);
+	queue->Edgerepo_maxsize = (CONNECTIVITY / 2) * (img_width * (img_height - 1) + (img_width - 1) * img_height);
 	queue->bucketrepo_maxsize = (uint32)((queue->Edgerepo_maxsize + NUM_GREYLEVELS - 1) / NUM_GREYLEVELS);
 	queue->CCrepo = (CCEdgeQueue*)Malloc(queue->CCrepo_maxsize * sizeof(CCEdgeQueue)); //Estimate the number of 0-CCs, and reduce the repo size later
 	queue->Edgerepo = (Edge*)Malloc(queue->Edgerepo_maxsize * sizeof(Edge));
@@ -442,6 +500,7 @@ void EdgeQueueInit(EdgeQueue *queue, uint32 img_width, uint32 img_height, double
 		else
 			queue->levelmap[i++] = num_levels++;
 	}
+	queue->num_levels = num_levels;
 	queue->level2alpha = (double*)Malloc(num_levels * sizeof(double));
 	for (i = 0; i < NUM_GREYLEVELS; i++)
 	{
@@ -457,16 +516,15 @@ void EdgeQueueInit(EdgeQueue *queue, uint32 img_width, uint32 img_height, double
 	Free(wlevel);
 }
 
+
+
 void EdgeQueueDelete(EdgeQueue *queue)
 {
 	Free(queue->CCrepo);
 	Free(queue->Edgerepo);
 	Free(queue->bucketrepo);
 	Free(queue->bucket);
-	Free(queue->levelmap);
-	Free(queue->wlevelmap);
 	Free(queue->level2alpha);
-	Free(queue);
 }
 
 AlphaTree *CreateAlphaTree(int imgsize, int treesize) {
@@ -483,7 +541,7 @@ void DeleteTree(AlphaTree *tree) {
 	Free(tree);
 }
 
-void AlphaNodeInit(AlphaTree *tree, pixel *img, pixel **ori_imgs, EdgeQueue *queue)
+void AlphaNodeInit(AlphaTree *tree, const pixel *img, const pixel **ori_imgs, EdgeQueue *queue)
 {
 	uint32 p;
 
@@ -537,7 +595,7 @@ int FindRoot(uint32 *root, uint32 p) {
 	}
 	return r;
 }
-
+/*
 int FindRoot1(AlphaTree *tree, uint32 *root, uint32 p) {
 	uint32 r = p, i, j;
 
@@ -553,7 +611,7 @@ int FindRoot1(AlphaTree *tree, uint32 *root, uint32 p) {
 	}
 	return r;
 }
-
+*/
 void Union0(AlphaTree *tree, uint32 *root, uint32 p, uint32 q) //both p and q are always roots. p and q never have a common root. p does not have a CCEqueue. use on Phase1 only.
 {
 	tree->node[p].parent = q;
@@ -612,18 +670,23 @@ void Union2(AlphaTree *tree, EdgeQueue *queue, uint32 *root, uint32 p, uint32 q)
 		qNode->main_ori = 1 - qNode->main_ori;
 #elif CONNECTIVITY == 8
 	if (qNode->orisum[qNode->main_ori] < qNode->orisum[0])
-		main_ori = 0;
+		qNode->main_ori = 0;
 	if (qNode->orisum[qNode->main_ori] < qNode->orisum[1])
-		main_ori = 1;
+		qNode->main_ori = 1;
 	if (qNode->orisum[qNode->main_ori] < qNode->orisum[2])
-		main_ori = 2;
+		qNode->main_ori = 2;
 	if (qNode->orisum[qNode->main_ori] < qNode->orisum[3])
-		main_ori = 3;
+		qNode->main_ori = 3;
 #endif
-	if(queue->bucket[queue->minlev] == qNode->ccqueue)
+	if (queue->bucket[queue->minlev] == qNode->ccqueue)
 		CCEdgeQueueMerge(queue, pNode->ccqueue, qNode->ccqueue);
 	else
-		CCEdgeQueueMerge(queue, qNode->ccqueue, pNode->ccqueue);
+	{
+		pNode->ccqueue->iNode = q;
+		qNode->ccqueue->iNode = p;
+		qNode->ccqueue = CCEdgeQueueMerge(queue, qNode->ccqueue, pNode->ccqueue);
+	}
+	
 }
 
 void Union3(AlphaTree *tree, EdgeQueue *queue, uint32 *root, uint32 p, uint32 q, uint32 r) // r <- p + q
@@ -652,14 +715,14 @@ void Union3(AlphaTree *tree, EdgeQueue *queue, uint32 *root, uint32 p, uint32 q,
 	if (rNode->orisum[rNode->main_ori] < rNode->orisum[1 - rNode->main_ori])
 		rNode->main_ori = 1 - rNode->main_ori;
 #elif CONNECTIVITY == 8
-	if (rNode->orisum[rNode->main_ori] < rNode->orisum[0])
-		main_ori = 0;
-	if (rNode->orisum[rNode->main_ori] < rNode->orisum[1])
-		main_ori = 1;
-	if (rNode->orisum[rNode->main_ori] < rNode->orisum[2])
-		main_ori = 2;
-	if (rNode->orisum[rNode->main_ori] < rNode->orisum[3])
-		main_ori = 3;
+	if (qNode->orisum[qNode->main_ori] < qNode->orisum[0])
+		qNode->main_ori = 0;
+	if (qNode->orisum[qNode->main_ori] < qNode->orisum[1])
+		qNode->main_ori = 1;
+	if (qNode->orisum[qNode->main_ori] < qNode->orisum[2])
+		qNode->main_ori = 2;
+	if (qNode->orisum[qNode->main_ori] < qNode->orisum[3])
+		qNode->main_ori = 3;
 #endif
 
 	if (queue->bucket[queue->minlev] == qNode->ccqueue)
@@ -669,7 +732,7 @@ void Union3(AlphaTree *tree, EdgeQueue *queue, uint32 *root, uint32 p, uint32 q,
 	rNode->ccqueue->iNode = r;
 }
 
-inline void PushEdge_NewPixel(AlphaTree *tree, EdgeQueue *queue, uint32 p, uint32 q, pixel *img, uint32 *root, uint8 orientation) // p is a new pixel
+inline void PushEdge_NewPixel(AlphaTree *tree, EdgeQueue *queue, uint32 p, uint32 q, const pixel *img, uint32 *root, uint8 orientation) // p is a new pixel
 {
 	uint32 s = FindRoot(root, q); // no need to find root of p
 	pixel edgeSalience = abs((int)img[p] - (int)img[q]);
@@ -679,7 +742,7 @@ inline void PushEdge_NewPixel(AlphaTree *tree, EdgeQueue *queue, uint32 p, uint3
 		PushEdgeToIncidentCCs_Newpixel(tree, queue, p, q, s, edgeSalience, orientation);
 }
 
-inline void PushEdge_OldPixel(AlphaTree *tree, EdgeQueue *queue, uint32 p, uint32 q, pixel *img, uint32 *root, uint8 orientation) 
+inline void PushEdge_OldPixel(AlphaTree *tree, EdgeQueue *queue, uint32 p, uint32 q, const pixel *img, uint32 *root, uint8 orientation) 
 {
 	uint32 r = FindRoot(root, p);
 	uint32 s = FindRoot(root, q);
@@ -782,6 +845,27 @@ void RelocCCEdgeQueue0(AlphaTree *tree, EdgeQueue *queue, CCEdgeQueue *cceq)
 	}
 	queue->minlev = MIN(queue->minlev, lev);
 }
+/*
+uint8 testCClist(AlphaTree *tree, EdgeQueue *queue)
+{
+	uint32 i, j, k;
+	CCEdgeQueue *p;
+	for (i = 0; i < tree->imgsize * 2; i++)
+		testarr[i] = 0;
+	for (i = 0; i < queue->num_levels; i++)
+	{
+		k = 0;
+		for (p = queue->bucket[i]; p; p = p->next)
+		{
+			j = p->iNode;
+			testarr[j]++;
+			if (testarr[j] == 2)
+				return 1;
+			k++;
+		}
+	}
+	return 0;
+}*/
 
 void RelocCCEdgeQueue1(AlphaTree *tree, EdgeQueue *queue, CCEdgeQueue *cceq)
 {
@@ -822,11 +906,14 @@ inline bool IsEmpty(EdgeQueue *queue)
 	return queue->minlev == queue->num_levels;
 }
 
+
 Edge* CCEdgeQueuePop(EdgeQueue *queue, CCEdgeQueue *cceq)
 {
 	Edge *ret;
 	uint8 ori = cceq->minori;
 	uint32 minlev, i;
+
+	uint8 test1, test2;//tmp
 	
 	if (cceq->bucket[ori])
 	{
@@ -852,11 +939,12 @@ Edge* CCEdgeQueuePop(EdgeQueue *queue, CCEdgeQueue *cceq)
 
 	}
 	cceq->curSize[ori]--;
+	numpop++;
 	return ret;
 }
 
-void Phase1(AlphaTree *tree, EdgeQueue *queue, uint32 *root,
-	pixel *img, pixel **ori_imgs, uint32 width, uint32 height) {
+void Phase1(AlphaTree *tree, EdgeQueue *queue, uint32 *root, const pixel *img, const pixel **ori_imgs, uint32 width, uint32 height)
+{
 	uint32 imgsize = width * height;
 	uint32 p, x, y;
 	
@@ -881,12 +969,16 @@ void Phase1(AlphaTree *tree, EdgeQueue *queue, uint32 *root,
 	for (y = 0; y < height - 1; y++)
 	{
 		PushEdge_NewPixel(tree, queue, p, p + width, img, root, 1);
+		PushEdge_OldPixel(tree, queue, p, p + width - 1, img, root, 3);
 		p--;
 		for (x = 0; x < width - 1; x++)
 		{
 			PushEdge_NewPixel(tree, queue, p, p + width, img, root, 1);
 			PushEdge_OldPixel(tree, queue, p, p + 1, img, root, 0);
+			PushEdge_OldPixel(tree, queue, p, p + width - 1, img, root, 3);
+			PushEdge_OldPixel(tree, queue, p, p + width + 1, img, root, 2);
 			p--;
+
 		}
 	}
 
@@ -901,6 +993,7 @@ bool IsRoot(AlphaTree *tree, uint32 iNode)
 Edge* EdgeQueuePop(AlphaTree *tree, EdgeQueue *queue)
 {
 	CCEdgeQueue *p;
+
 	while (1) //Edgequeue bucket should never be empty
 	{
 		p = queue->bucket[queue->minlev];
@@ -914,22 +1007,82 @@ Edge* EdgeQueuePop(AlphaTree *tree, EdgeQueue *queue)
 		}
 		queue->minlev++;
 	}
+
 	return CCEdgeQueuePop(queue, queue->bucket[queue->minlev]);
 }
 
-void Phase2(AlphaTree *tree, EdgeQueue *queue, uint32 *root,
-	pixel *img,	uint32 width, uint32 height) {
+uint8 testcceqbucket(CCEdgeQueue *cceq)
+{
+	uint8 test0 = 0, test1 = 0, test2 = 0, test3 = 0;
+	if (cceq->minlev_ori[0] < 255)
+	{
+		if (cceq->bucket[0])
+			test0 = (cceq->bucket[0]->levelhead[cceq->minlev_ori[0]] == NULL) ||
+			(cceq->bucket[0]->levelhead[cceq->minlev_ori[0]] == (Edge*)(0xcdcdcdcdcdcdcdcd));
+		else
+			test0 = cceq->queue[0]->level != cceq->minlev_ori[0];
+	}
+	if (cceq->minlev_ori[1] < 255)
+	{
+		if (cceq->bucket[1])
+			test1 = (cceq->bucket[1]->levelhead[cceq->minlev_ori[1]] == NULL) ||
+			(cceq->bucket[1]->levelhead[cceq->minlev_ori[1]] == (Edge*)(0xcdcdcdcdcdcdcdcd));
+		else
+			test1 = cceq->queue[1]->level != cceq->minlev_ori[1];
+	}
+#if CONNECTIVITY == 8
+	if (cceq->minlev_ori[2] < 255)
+	{
+		if (cceq->bucket[2])
+			test1 = (cceq->bucket[2]->levelhead[cceq->minlev_ori[2]] == NULL) ||
+			(cceq->bucket[2]->levelhead[cceq->minlev_ori[2]] == (Edge*)(0xcdcdcdcdcdcdcdcd));
+		else
+			test1 = cceq->queue[2]->level != cceq->minlev_ori[2];
+	}
+	if (cceq->minlev_ori[3] < 255)
+	{
+		if (cceq->bucket[3])
+			test1 = (cceq->bucket[3]->levelhead[cceq->minlev_ori[3]] == NULL) ||
+			(cceq->bucket[3]->levelhead[cceq->minlev_ori[3]] == (Edge*)(0xcdcdcdcdcdcdcdcd));
+		else
+			test1 = cceq->queue[3]->level != cceq->minlev_ori[3];
+	}
+#endif
+	//	if (cceq->bucket[0] == NULL && cceq->minlev_ori[0] < 255)
+	//		return 1;
+	//	if (cceq->bucket[1] == NULL && cceq->minlev_ori[1] < 255)
+	//		return 1;
+
+	return  test0 || test1 || test2 || test3;
+}
+
+void Phase2(AlphaTree *tree, EdgeQueue *queue, uint32 *root, uint32 width, uint32 height)
+{
 	Edge *currentEdge;
 	uint32 v1, v2, r, imgsize = width * height;
+
+	uint8 test1, test2;
+	//uint32 v11, v22;
+	uint32 cnt = 0;
+	v1 = 0;
+	v2 = 0;
 	bool AreWeDoneYet = 0;
 	double alpha12;
 	while (!AreWeDoneYet) {
+		
+		if (testcceqbucket(tree->node[v2].ccqueue))
+			test1 = test1;
 		currentEdge = EdgeQueuePop(tree, queue); // calc minlev (using weight and stuff) later
+	
 		v1 = FindRoot(root, currentEdge->p);
 		v2 = FindRoot(root, currentEdge->q);
-		//GetAncestors(tree, root, &v1, &v2);
+
 		if (v1 != v2) {
 			alpha12 = queue->level2alpha[queue->minlev];
+
+			test1 = testcceqbucket(tree->node[v2].ccqueue);
+		//	if (currentEdge->p == 37022 && currentEdge->q == 37323)
+		//		test1 = test1;
 
 			if (v1 > v2)
 				Swap(&v1, &v2);
@@ -943,14 +1096,30 @@ void Phase2(AlphaTree *tree, EdgeQueue *queue, uint32 *root,
 			else { //IF tree->node[v1].alpha > alpha12, chage alpha12 to tree->node[v1].alpha
 				Union2(tree, queue, root, v1, v2);
 			}
+			
+			test2 = testcceqbucket(tree->node[v2].ccqueue);
+			if (test1 == 0 && test2 == 1)
+				test1 = test1;
+			if (test1 || test2)
+				test1 = test1;
 			AreWeDoneYet = (tree->node[v2].area == imgsize);
+
 		}
+
 		RelocCCEdgeQueue1(tree, queue, tree->node[v2].ccqueue);
 	}
 }
 
-AlphaTree *MakeSalienceTree(pixel *img, pixel **ori_imgs, uint8 connectivity,
-	uint32 width, uint32 height, uint32 channel, double ori_weight, double lambdamin) {
+bool IsLevelRoot(AlphaTree *tree, uint32 i) {
+	int parent = tree->node[i].parent;
+
+	if (parent == i)
+		return true;
+	return (tree->node[i].alpha != tree->node[parent].alpha);
+}
+
+AlphaTree *MakeAlphaTree(const pixel *img, const pixel **ori_imgs, uint8 connectivity, uint32 width, uint32 height, uint32 channel, double ori_weight)
+{
 	uint32 imgsize = (uint32)width * (uint32)height;
 	EdgeQueue queue;
 	uint32 *root = (uint32*)Malloc(imgsize * 2 * sizeof(uint32));
@@ -987,9 +1156,11 @@ AlphaTree *MakeSalienceTree(pixel *img, pixel **ori_imgs, uint8 connectivity,
 	assert(tree != NULL);
 	assert(tree->node != NULL);
 	//fprintf(stderr,"Phase1 started\n");
+	//Free(queue.levelmap);
+	//Realloc(queue.levelmap, queue.num_grey_levels);//tmp
 	Phase1(tree, &queue, root, img, ori_imgs, width, height);
 	//fprintf(stderr,"Phase2 started\n");
-	Phase2(tree, &queue, root, img, width, height);
+	Phase2(tree, &queue, root, width, height);
 	//fprintf(stderr,"Phase2 done\n");
 	EdgeQueueDelete(&queue);
 	Free(root);
@@ -998,13 +1169,13 @@ AlphaTree *MakeSalienceTree(pixel *img, pixel **ori_imgs, uint8 connectivity,
 	return tree;
 }
 
-/*
+
 void SalienceTreeAreaFilter(AlphaTree *tree, pixel *out, int lambda) {
-	int i, j, imgsize = tree->maxSize / 2;
+	uint32 i, imgsize = tree->maxSize / 2;
 	if (lambda <= imgsize) {
 		tree->node[tree->curSize - 1].outval =
 			tree->node[tree->curSize - 1].sumPix / tree->node[tree->curSize - 1].area;
-		for (i = tree->curSize - 2; i >= 0; i--) {
+		for (i = tree->curSize - 2; i != 0xffffffff; i--) {
 
 			if (IsLevelRoot(tree, i) && (tree->node[i].area >= lambda)) {
 				tree->node[i].outval = tree->node[i].sumPix / tree->node[i].area;
@@ -1015,14 +1186,14 @@ void SalienceTreeAreaFilter(AlphaTree *tree, pixel *out, int lambda) {
 		}
 	}
 	else {
-		for (i = tree->curSize - 1; i >= 0; i--) {
+		for (i = tree->curSize - 1; i != 0xffffffff; i--) {
 			tree->node[i].outval = 0;
 		}
 	}
 	for (i = 0; i < imgsize; i++)
 		out[i] = tree->node[i].outval;
 }
-*/
+
 #define NodeSalience(tree, p) (tree->node[Par(tree,p)].alpha)
 /*
 void SalienceTreeSalienceFilter(SalienceTree *tree, pixel *out, double lambda) {
@@ -1215,6 +1386,7 @@ int main(int argc, char *argv[]) {
 				}
 				cv::String str1(p.path().string().c_str());
 				cv::Mat cvimg;
+				cv::Mat outimg;
 				if (i == 0)
 					cvimg = imread(str1, cv::IMREAD_GRAYSCALE);
 				else
@@ -1222,6 +1394,7 @@ int main(int argc, char *argv[]) {
 					cvimg = imread(str1, cv::IMREAD_COLOR);
 					cv::cvtColor(cvimg, cvimg, CV_BGR2GRAY);
 				}
+				cvimg.copyTo(outimg);
 
 				/*
 				cv::namedWindow("Display window", cv::WINDOW_AUTOSIZE);// Create a window for display.
@@ -1250,10 +1423,11 @@ int main(int argc, char *argv[]) {
 					auto wcts = std::chrono::system_clock::now();
 
 					cv::Mat dest[CONNECTIVITY / 2];
-					double orientation[4] = { 0, M_PI / 2, M_PI / 4, 3 * M_PI / 4 };
+					double orientation[4] = { M_PI / 2, 0, M_PI / 4, 3 * M_PI / 4 };
 					cv::Mat src_f;
 					cvimg.convertTo(src_f, CV_32F);
 
+					pixel *ori_imgs[2];
 					for (int ori_idx = 0; ori_idx < CONNECTIVITY / 2; ori_idx++)
 					{
 						int kernel_size = 31;
@@ -1261,13 +1435,15 @@ int main(int argc, char *argv[]) {
 						cv::Mat kernel = cv::getGaborKernel(cv::Size(kernel_size, kernel_size), sig, th, lm, gm, ps);
 						cv::filter2D(src_f, dest[ori_idx], CV_32F, kernel);
 						dest[ori_idx].convertTo(dest[ori_idx], CV_8U, 1.0 / 255.0); //because I don't know how to access float type Mat...
+						ori_imgs[ori_idx] = (pixel*)dest[ori_idx].data;
 						//cerr << dest(Rect(30, 30, 10, 10)) << endl; // peek into the data
 
 						//Gabor Filtering visualization
-						/*cv::Mat viz;
+						/*
+						cv::Mat viz;
 						cv::imshow("input", cvimg);
 						cv::imshow("k", kernel);
-						dest[ori_idx].convertTo(dest[ori_idx], CV_8U, 1.0 / 255.0);
+						//dest[ori_idx].convertTo(dest[ori_idx], CV_8U, 1.0 / 255.0);
 						cv::imshow("d", dest[ori_idx]);
 						cv::waitKey();
 						*/
@@ -1317,9 +1493,13 @@ int main(int argc, char *argv[]) {
 					tree = MakeSalienceTree(testimg, ori_imgs, 4, 5, 3, 1, 2, 3.0);
 					*/
 
-					tree = MakeSalienceTree(cvimg.data, width, height, channel, 3.0);
-										//		start = clock();
-
+					tree = MakeAlphaTree(cvimg.data, ori_imgs, CONNECTIVITY, width, height, channel, 20.0);
+					//		start = clock();
+					for (uint32 i = 0; i < height * width; i++)
+						outimg.data[i] = 0;
+					SalienceTreeAreaFilter(tree, (pixel*)outimg.data, 5);
+					cv::imshow("out", outimg);
+					cv::waitKey();
 
 
 					std::chrono::duration<double> wctduration = (std::chrono::system_clock::now() - wcts);
